@@ -1,20 +1,23 @@
 from .common import *
 import torch
 import torch.nn as nn
-from .custom_module import CSPNAccelerate, DYSPNAccelerate_just_ex
+from .custom_module import CSPNAccelerate, DYSPN_, HYPER_CSPN
+from .hyperbolic import hyperbolicLayer
 
 class Model(nn.Module):
     def __init__(self, args):
         super(Model, self).__init__()
 
         self.args = args
+
         if self.args.model_name == 'S2D':
             self.num_neighbors = 0
-        elif self.args.model_name == 'CSPN':
-            self.num_neighbors = self.args.prop_kernel*self.args.prop_kernel # 49
+        elif self.args.model_name == 'CSPN' or self.args.model_name == 'HYPER_CSPN':
+            self.num_neighbors = self.args.prop_kernel * self.args.prop_kernel # 49
         elif self.args.model_name == 'DYSPN':
-            self.num_neighbors = self.args.prop_kernel * self.args.prop_kernel + 1# 50
-
+            self.num_neighbors = self.args.prop_kernel * self.args.prop_kernel + 1 # 50
+        elif self.args.model_name == 'HYPERBOLIC_DYSPN':
+            self.num_neighbors = self.args.prop_kernel * self.args.prop_kernel + 1 # 50
 
         # Encoder
         self.conv1_rgb = conv_bn_relu(3, 48, kernel=3, stride=1, padding=1,
@@ -67,36 +70,69 @@ class Model(nn.Module):
 
         # Guidance Branch
         # 1/1
-        if self.args.model_name != 'S2D':
+        if self.args.model_name == 'CSPN' or self.args.model_name == 'DYSPN':
             self.gd_dec1 = conv_bn_relu(64+64, 64, kernel=3, stride=1,
                                         padding=1)
             self.gd_dec0 = conv_bn_relu(64+64, self.num_neighbors, kernel=3, stride=1,
                                         padding=1, bn=False, relu=False)
             self.softplus = nn.Softplus()
 
+        if self.args.model_name == 'HYPERBOLIC_DYSPN':
+            self.gd_dec1 = conv_bn_relu(64+64, 64, kernel=3, stride=1,
+                                        padding=1)
+            self.gd_dec0 = conv_bn_relu(64+64, self.num_neighbors, kernel=3, stride=1,
+                                        padding=1, bn=False, relu=False)
+            self.softplus = nn.Softplus()
+
+
         if self.args.model_name == 'DYSPN':
             # Confidence Branch
             # Confidence is shared for propagation and mask generation
             # 1/1
-            self.cf_dec1 = conv_bn_relu(64+64, 32, kernel=3, stride=1,
+            self.cf_dec1 = conv_bn_relu(64+64, 64, kernel=3, stride=1,
                                         padding=1)
             self.cf_dec0 = nn.Sequential(
-                nn.Conv2d(32+64, 1, kernel_size=3, stride=1, padding=1),
+                nn.Conv2d(64+64, 1, kernel_size=3, stride=1, padding=1),
+                nn.Sigmoid()
+            )
+
+            self.att1_dec1 = conv_bn_relu(64+64, 64, kernel=3, stride=1,
+                                        padding=1)
+            self.att0_dec0 = nn.Sequential(
+                nn.Conv2d(64+64, 24, kernel_size=3, stride=1, padding=1),
+                nn.Sigmoid()
+            )
+        if self.args.model_name == 'HYPERBOLIC_DYSPN':
+
+            self.cf_dec1 = conv_bn_relu(64+64, 64, kernel=3, stride=1,
+                                        padding=1)
+            self.cf_dec0 = nn.Sequential(
+                nn.Conv2d(64+64, 1, kernel_size=3, stride=1, padding=1),
                 nn.Sigmoid()
             )
 
             self.att1_dec1 = conv_bn_relu(64+64, 32, kernel=3, stride=1,
                                         padding=1)
-            self.att0_dec0 = nn.Sequential(
-                nn.Conv2d(32+64, 24, kernel_size=3, stride=1, padding=1),
-                nn.Sigmoid()
-            )
+
+            self.att0_dec0_hyper1 = hyperbolicLayer.HypCNN(64 + 32, 6, self.args.patch_height, self.args.patch_width,
+                                   {'non_linearity': False, 'train_c': True, 'hypCNN_mode': 'naive',
+                                    'batchnorm': False})
+            self.att0_dec0_hyper3 = hyperbolicLayer.HypCNN(64 + 32, 6, self.args.patch_height, self.args.patch_width,
+                                   {'non_linearity': False, 'train_c': True, 'hypCNN_mode': 'naive',
+                                    'batchnorm': False})
+            self.att0_dec0_hyper5 = hyperbolicLayer.HypCNN(64 + 32, 6, self.args.patch_height, self.args.patch_width,
+                                   {'non_linearity': False, 'train_c': True, 'hypCNN_mode': 'naive',
+                                    'batchnorm': False})
+            self.att0_dec0_hyper7 = hyperbolicLayer.HypCNN(64 + 32, 6, self.args.patch_height, self.args.patch_width,
+                                   {'non_linearity': False, 'train_c': True, 'hypCNN_mode': 'naive',
+                                    'batchnorm': False})
 
         if self.args.model_name == 'CSPN':
             self.prop_layer = CSPNAccelerate(self.args.prop_kernel)
+            #self.prop_layer = HYPER_CSPN(self.args.prop_kernel)
 
-        elif self.args.model_name == 'DYSPN':
-            self.prop_layer = DYSPNAccelerate_just_ex(self.args.prop_kernel)
+        elif self.args.model_name == 'DYSPN' or self.args.model_name == 'HYPERBOLIC_DYSPN':
+            self.prop_layer = DYSPN_(self.args.prop_kernel)
 
         # Set parameter groups
         params = []
@@ -165,7 +201,7 @@ class Model(nn.Module):
             else:
                 guide = guide_
 
-        if self.args.model_name == 'DYSPN':
+        if  self.args.model_name == 'DYSPN':
             # Confidence Decoding
             # Attention Decoding
             cf_fd1 = self.cf_dec1(self._concat(fd2, fe2))
@@ -173,33 +209,63 @@ class Model(nn.Module):
 
             att_fd1 = self.att1_dec1(self._concat(fd2, fe2))
             attention = self.att0_dec0(self._concat(att_fd1, fe1))
-            # print(attention.shape)
-            # Only n-times of num_gpus supprot
+            # Only n-times of num_gpus support
             bs, _, h, w = attention.shape
+
             if bs == 1:
                 attention = attention.view(bs, 6, 4,
                                        self.args.patch_height, self.args.patch_width)
             elif bs > 1:
                 attention = attention.view(int(self.args.batch_size / self.args.num_gpus), 6, 4,
                                            self.args.patch_height, self.args.patch_width)
+            #     B 6(iteration) 4(7/5/3/1) H W
+            #     HypCNN *4 4 : curvature trainable
+            #     attention_1 : B 6 1(7) H W
+            #     attention_2 : B 6 1(5) H W
+            #     attention_3 : B 6 1(3) H W
+            #     attention_4 : B 6 1(1) H W
             else:
                 raise Exception('Batch size must be multiple of number of gpus, bs={}, gpus={}'.format(bs, self.args.num_gpus))
-            if self.args.attention_normal:
-                attention_sum = torch.sum(attention, dim=2, keepdim=True)
-                attention = torch.div(attention, attention_sum)
+        if self.args.model_name == 'HYPERBOLIC_DYSPN':
+            cf_fd1 = self.cf_dec1(self._concat(fd2, fe2))
+            confidence = self.cf_dec0(self._concat(cf_fd1, fe1))
+
+            att_fd1 = self.att1_dec1(self._concat(fd2, fe2))
+
+            attention1 = self.att0_dec0_hyper1(self._concat(att_fd1, fe1))
+            attention1 = attention1.unsqueeze(2)
+
+            attention3 = self.att0_dec0_hyper3(self._concat(att_fd1, fe1))
+            attention3 = attention3.unsqueeze(2)
+
+            attention5 = self.att0_dec0_hyper5(self._concat(att_fd1, fe1))
+            attention5 = attention5.unsqueeze(2)
+
+            attention7 = self.att0_dec0_hyper7(self._concat(att_fd1, fe1))
+            attention7 = attention7.unsqueeze(2)
+
+            attention = torch.cat([attention1, attention3, attention5, attention7], dim=2)
+
+            bs, _, k, h, w = attention.shape
+
+            if bs > 1:
+                attention = attention.view(int(self.args.batch_size / self.args.num_gpus), 6, 4,
+                                           self.args.patch_height, self.args.patch_width)
 
         if self.args.model_name == 'CSPN':
             sparse_mask = dep.sign()
             depth = pred_init
+
             for _ in range(self.args.prop_time):
                 depth = dep * sparse_mask + (1 - sparse_mask) * depth
                 depth = self.prop_layer(guide, depth, pred_init)
             depth = torch.clamp(depth, min=0)
 
-        elif self.args.model_name == 'DYSPN':
+        elif self.args.model_name == 'DYSPN' or self.args.model_name == 'HYPERBOLIC_DYSPN':
             sparse_mask = dep.sign()
             depth = pred_init
             sparse_depth = dep * confidence
+
             if not self.args.sparse_order_reverse:
                 for i in range(self.args.prop_time):  # dyspn prop_time default 6
                     depth = sparse_mask * sparse_depth + (1 - sparse_mask) * depth
@@ -210,7 +276,6 @@ class Model(nn.Module):
                     depth = sparse_mask * sparse_depth + (1 - sparse_mask) * depth
 
             depth = torch.clamp(depth, min=0)
-
 
         if self.args.model_name == 'S2D':
             pred_init = torch.clamp(pred_init, min=0)
@@ -227,7 +292,7 @@ class Model(nn.Module):
             output = {'pred': depth, 'pred_init': pred_init,
                   'guidance': guide, 'confidence': confidence, 'attention': attention}
 
-        elif self.args.model_name == 'DYSPN':
+        elif self.args.model_name == 'DYSPN' or self.args.model_name == 'HYPERBOLIC_DYSPN':
             output = {'pred': depth, 'pred_init': pred_init,
                   'guidance': guide, 'confidence': confidence, 'attention': attention}
 

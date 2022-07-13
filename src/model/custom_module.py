@@ -2,27 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-
-'''import torch
-gks3 = 7  # guide kernel size
-pad7 = []
-pad5 = []
-pad3 = []
-pad1 = []
-for i in range(gks3):
-    for j in range(gks3):
-        top = i
-        bottom = gks3 - 1 - i
-        left = j
-        right = gks3 - 1 - j
-        if top == 6 or bottom == 6 or left == 6 or right == 6:
-          pad7.append(torch.nn.ZeroPad2d((left, right, top, bottom)))
-        elif top == 5 or bottom == 5 or left == 5 or right == 5:
-          pad5.append(torch.nn.ZeroPad2d((left, right, top, bottom)))
-        elif top == 4 or bottom == 4 or left == 4 or right == 4:
-          pad3.append(torch.nn.ZeroPad2d((left, right, top, bottom)))
-        else:
-          pad1.append(torch.nn.ZeroPad2d((left, right, top, bottom)))'''
+from .hyperbolic import hypernn
 
 gks = 5
 pad = [i for i in range(gks * gks)]
@@ -322,9 +302,9 @@ class CSPNAccelerate(nn.Module):
         output = (input_im2col * kernel).sum(dim=1)
         return output.view(bs, 1, h, w)
 
-class DYSPNAccelerate(nn.Module):
+class DYSPN_(nn.Module):
     def __init__(self, kernel_size):
-        super(DYSPNAccelerate, self).__init__()
+        super(DYSPN_, self).__init__()
         self.kernel_size = kernel_size
 
     def forward(self, kernel, input, input0, attention, i):
@@ -336,54 +316,7 @@ class DYSPNAccelerate(nn.Module):
         elif self.kernel_size == 7:
           input_im2col = F.unfold(input, self.kernel_size, 1, 3, 1)
 
-        new_kernel = torch.zeros_like(kernel)
-        mid_index = int((self.kernel_size * self.kernel_size - 1) / 2)
-        line7 = [j for j in range(self.kernel_size * self.kernel_size) if 0 <= j <= 7 or 13 <= j <= 14 or 20 <= j <= 21 or 27 <= j <= 28 or 34 <= j <= 35 or 41 <= j <= 48]
-        line5 = [j for j in range(self.kernel_size * self.kernel_size) if 8 <= j <= 12 or j == 15 or j == 19 or j == 22 or j == 26 or j == 29 or j == 33 or 36 <= j <= 40]
-        line3 = [j for j in range(self.kernel_size * self.kernel_size) if 16 <= j <= 18 or j == 23 or j == 25 or 30 <= j <= 32]
-
-        new_kernel[:, line7, :] = \
-            kernel[:, line7, :] * attention[:, i, 3].unsqueeze(1)
-
-        new_kernel[:, line5, :] = \
-            kernel[:, line5, :] * attention[:, i, 2].unsqueeze(1)
-
-        new_kernel[:, line3, :] = \
-            kernel[:, line3, :] * attention[:, i, 1].unsqueeze(1)
-
-        new_kernel[:,  mid_index, :] = \
-            kernel[:,  mid_index, :] * attention[:, i, 0]
-
-        new_kernel_sum = torch.sum(new_kernel.abs(), dim=1, keepdim=True)
-        new_kernel = torch.div(new_kernel, new_kernel_sum)
-        new_kernel = new_kernel.reshape(bs, self.kernel_size * self.kernel_size, h * w)
-
-        # standard CSPN
-        input0 = input0.view(bs, 1, h * w)
-
-        #DS
-        #input_h = input_im2col[:, mid_index:mid_index + 1, :]
-        input_im2col[:, mid_index:mid_index + 1, :] = input0
-        #input_im2col_ = torch.cat([input_im2col, input_h], dim=1)
-
-        output = (input_im2col * new_kernel).sum(dim=1)
-        return output.view(bs, 1, h, w)
-
-class DYSPNAccelerate_just_ex(nn.Module):
-    def __init__(self, kernel_size):
-        super(DYSPNAccelerate_just_ex, self).__init__()
-        self.kernel_size = kernel_size
-
-    def forward(self, kernel, input, input0, attention, i):
-        bs = input.size()[0]
-        h, w = input.size()[2], input.size()[3]
-
-        if self.kernel_size == 3:
-          input_im2col = F.unfold(input, self.kernel_size, 1, 1, 1)
-        elif self.kernel_size == 7:
-          input_im2col = F.unfold(input, self.kernel_size, 1, 3, 1)
-
-        new_kernel = torch.zeros_like(kernel)
+        new_kernel = torch.zeros_like(kernel) # 50
         mid_index = int((self.kernel_size * self.kernel_size - 1) / 2)
         line7 = [j for j in range(self.kernel_size * self.kernel_size) if 0 <= j <= 7 or 13 <= j <= 14 or 20 <= j <= 21 or 27 <= j <= 28 or 34 <= j <= 35 or 41 <= j <= 48]#24
         line5 = [j for j in range(self.kernel_size * self.kernel_size) if 8 <= j <= 12 or j == 15 or j == 19 or j == 22 or j == 26 or j == 29 or j == 33 or 36 <= j <= 40]#16
@@ -399,7 +332,7 @@ class DYSPNAccelerate_just_ex(nn.Module):
             kernel[:, line3, :] * attention[:, i, 1].unsqueeze(1)
 
         new_kernel[:,  mid_index, :] = \
-            kernel[:,  mid_index, :] * attention[:, i, 0]
+            kernel[:, mid_index, :] * attention[:, i, 0]
 
         new_kernel[:, self.kernel_size * self.kernel_size, :] = \
             kernel[:, self.kernel_size * self.kernel_size, :]
@@ -408,24 +341,19 @@ class DYSPNAccelerate_just_ex(nn.Module):
         new_kernel = torch.div(new_kernel, new_kernel_sum)
         new_kernel = new_kernel.reshape(bs, self.kernel_size * self.kernel_size + 1, h * w)
 
-        # standard CSPN
+        # DS
         input0 = input0.view(bs, 1, h * w)
-        inputh0 = input_im2col[:, mid_index:mid_index + 1,:]
-        input_im2col[:, mid_index:mid_index + 1, :] = input0
-        input_im2col_ = torch.cat([input_im2col, inputh0], dim=1)
-
+        input_im2col_ = torch.cat([input_im2col, input0], dim=1)
         output = (input_im2col_ * new_kernel).sum(dim=1)
         return output.view(bs, 1, h, w)
 
-class CSPNAccelerate_dyspn_normal(nn.Module):
-    def __init__(self, kernel_size, dilation=1, padding=1, stride=1):
-        super(CSPNAccelerate_dyspn_normal, self).__init__()
+class HYPER_CSPN(nn.Module):
+    def __init__(self, kernel_size):
+        super(HYPER_CSPN, self).__init__()
         self.kernel_size = kernel_size
-        self.dilation = dilation
-        self.padding = padding
-        self.stride = stride
+        self.ToPoincare = hypernn.ToPoincare(train_c=True)
 
-    def forward(self, kernel, input, input0, attention, i):
+    def forward(self, kernel, input, input0):
         bs = input.size()[0]
         h, w = input.size()[2], input.size()[3]
 
@@ -434,41 +362,20 @@ class CSPNAccelerate_dyspn_normal(nn.Module):
         elif self.kernel_size == 7:
           input_im2col = F.unfold(input, self.kernel_size, 1, 3, 1)
 
-        new_kernel = torch.zeros_like(kernel)
-        mid_index = int((self.kernel_size * self.kernel_size - 1) / 2)
+        kernel = kernel.reshape(bs, self.kernel_size * self.kernel_size, h * w)
+        kernel = kernel.permute(0, 2, 1)
 
-        line7 = [j for j in range(self.kernel_size * self.kernel_size) if 0 <= j <= 7 or 13 <= j <= 14 or 20 <= j <= 21 or 27 <= j <= 28 or 34 <= j <= 35 or 41 <= j]
-        line5 = [j for j in range(self.kernel_size * self.kernel_size) if 8 <= j <= 12 or j == 15 or j == 19 or j == 22 or j == 26 or j == 29 or j == 33 or 36 <= j <= 40]
-        line3 = [j for j in range(self.kernel_size * self.kernel_size) if 16 <= j <= 18 or j == 23 or j == 25 or 29 <= j <= 31]
+        kernel = self.ToPoincare(kernel)
+        kernel = kernel.permute(0, 2, 1)
 
-        new_kernel[:, line7, :] = \
-            kernel[:, line7, :] * attention[:, i, 0].unsqueeze(1)
-
-        new_kernel[:, line5, :] = \
-            kernel[:, line5, :] * attention[:, i, 1].unsqueeze(1)
-
-        new_kernel[:, line3, :] = \
-            kernel[:, line3, :] * attention[:, i, 2].unsqueeze(1)
-
-        new_kernel[:, mid_index, :] = \
-            kernel[:, mid_index, :] * attention[:, i, 3]
-
-        new_kernel[:, self.kernel_size * self.kernel_size, :] = \
-            kernel[:, self.kernel_size * self.kernel_size, :]
-
-        new_kernel_sum = torch.sum(kernel.abs(), dim=1, keepdim=True)
-        new_kernel = torch.div(new_kernel, new_kernel_sum)
-
-        new_kernel = new_kernel.reshape(bs, self.kernel_size * self.kernel_size + 1, h * w)
+        kernel_sum = torch.sum(kernel.abs(), dim=1, keepdim=True)
+        kernel = torch.div(kernel, kernel_sum)
 
         input0 = input0.view(bs, 1, h * w)
-        #input_im2col[:, mid_index:mid_index + 1, :] = input0
-        input_im2col = torch.cat([input_im2col, input0], dim=1)
+        mid_index = int((self.kernel_size * self.kernel_size - 1) / 2)
+        input_im2col[:, mid_index:mid_index + 1, :] = input0
 
-        output = (input_im2col * new_kernel).sum(dim=1)
+        output = (input_im2col * kernel).sum(dim=1)
         return output.view(bs, 1, h, w)
-
-
-
 
 
