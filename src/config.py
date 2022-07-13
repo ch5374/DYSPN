@@ -63,7 +63,7 @@ parser.add_argument('--seed',
 parser.add_argument('--gpus',
                     type=str,
                     #default="0,1,2,3",
-                    default="0,1,2,3,4",
+                    default="0,1,2,3",
                     help='visible GPUs')
 parser.add_argument('--port',
                     type=str,
@@ -83,7 +83,7 @@ parser.add_argument('--no_multiprocessing',
 parser.add_argument('--model_name',
                     type=str,
                     default='NLSPN',
-                    choices=('NLSPN','S2D','CSPN','DYSPN'),
+                    choices=('NLSPN','S2D','CSPN','DYSPN', 'HYPERBOLIC_DYSPN'),
                     help='model name')
 parser.add_argument('--network',
                     type=str,
@@ -107,9 +107,6 @@ parser.add_argument('--prop_kernel',
 parser.add_argument('--guide_normal',
                     default=True,
                     help='Normalize affinity')
-parser.add_argument('--attention_normal',
-                    default=False,
-                    help='Normalize attention')
 parser.add_argument('--sparse_order_reverse',
                     default=False,
                     help='After propagation once, then fill spares depth')

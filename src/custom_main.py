@@ -1,17 +1,3 @@
-"""
-    Non-Local Spatial Propagation Network for Depth Completion
-    Jinsun Park, Kyungdon Joo, Zhe Hu, Chi-Kuei Liu and In So Kweon
-
-    European Conference on Computer Vision (ECCV), Aug 2020
-
-    Project Page : https://github.com/zzangjinsun/NLSPN_ECCV20
-    Author : Jinsun Park (zzangjinsun@kaist.ac.kr)
-
-    ======================================================================
-
-    main script for training and testing.
-"""
-
 
 from config import args as args_config
 import time
@@ -101,6 +87,7 @@ def train(gpu, args):
         dataset=data_train, batch_size=batch_size, shuffle=False,
         num_workers=args.num_threads, pin_memory=True, sampler=sampler_train,
         drop_last=True)
+
     loader_val = DataLoader(
         dataset=data_val, batch_size=1, shuffle=False,
         num_workers=args.num_threads, pin_memory=True, sampler=sampler_val,
@@ -178,7 +165,7 @@ def train(gpu, args):
         warm_up_cnt = 0.0
         warm_up_max_cnt = len(loader_train)+1.0
 
-    for epoch in range(1, args.epochs+1):
+    for epoch in range(1, args.epochs + 1):
         # Train
         net.train()
 
@@ -422,10 +409,10 @@ def main(args):
                     process.terminate()
                 process.join()
 
-
-    if not args.train_val_only:
-        #args.pretrain = '{}/model_{:05d}.pt'.format(args.save_dir,
-         #                                           args.epochs)
+    if args.data_name == 'NYU' or args.test_only:
+        if not args.train_val_only:
+            test(args)
+    else:
         test(args)
 
 
