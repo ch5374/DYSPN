@@ -1,8 +1,7 @@
-from hyptorch.nn import *
+from .hypernn import *
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-
 
 class HypCNN(nn.Module):
     def __init__(self, in_channels, out_channels, oheight, owidth, config):
@@ -29,8 +28,8 @@ class HypCNN(nn.Module):
     def forward(self, x):
         x = self._up_pool(x)
         if self.oheight != 0 and self.owidth != 0:
-            x = x.narrow(2, 0, self.oheight)
-            x = x.narrow(3, 0, self.owidth)
+             x = x.narrow(2, 0, self.oheight)
+             x = x.narrow(3, 0, self.owidth)
         x_ = self.hypConv(x)
         if self.bn:
             return self.bn(self.sigmoid(x_))
